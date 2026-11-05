@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>AR断面計測 試作</title>
+<style>
+  :root{
+    --bg:#111418; --fg:#f2f3f5; --mute:#9aa3ad; --accent:#ffb020; --ok:#4cd27a; --ng:#ff5c5c;
+    --panel:rgba(17,20,24,.72);
+  }
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+  #overlay{position:fixed;inset:0;pointer-events:none;display:flex;flex-direction:column;justify-content:space-between}
+  #top{pointer-events:auto;margin:env(safe-area-inset-top,0) 12px 0;padding:10px 12px;background:var(--panel);border-radius:10px;backdrop-filter:blur(6px)}
+  #top h1{margin:0 0 4px;font-size:13px;color:var(--mute);font-weight:600;letter-spacing:.04em}
+  #status{font-size:13px;color:var(--mute)}
+  #readout{font-variant-numeric:tabular-nums;max-height:34vh;overflow:auto;margin-top:6px}
+  #readout div{display:flex;justify-content:space-between;gap:10px;border-top:1px solid rgba(255,255,255,.08);padding:3px 0}
+  #readout .k{color:var(--mute)} #readout .v{font-weight:600}
+  #readout .ang .v{color:var(--accent)}
+  #readout .tot{border-top:2px solid rgba(255,255,255,.25);margin-top:4px;font-size:15px}
+  #bottom{pointer-events:auto;margin:0 12px calc(env(safe-area-inset-bottom,0) + 12px);display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+  button{font:inherit;font-weight:700;padding:14px 8px;border:0;border-radius:10px;background:#2a3038;color:var(--fg);cursor:pointer}
+  button.primary{background:var(--accent);color:#111}
+  button.danger{background:#3a2323;color:#ffb3b3}
+  button:disabled{opacity:.4}
+  #hint{grid-column:1/-1;text-align:center;color:var(--mute);font-size:12px;background:var(--panel);border-radius:8px;padding:6px}
+  #start{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:24px;text-align:center}
+  #start h1{font-size:20px;margin:0}
+  #start p{color:var(--mute);max-width:32ch;margin:0}
+  #start button{width:min(100%,320px);font-size:16px}
+  #unsupported{color:var(--ng);display:none;max-width:36ch}
+  #result{position:fixed;inset:0;background:var(--bg);display:none;flex-direction:column;padding:calc(env(safe-area-inset-top,0) + 16px) 16px 16px;gap:10px;overflow:auto}
+  #result h2{margin:0;font-size:16px}
+  #result textarea{width:100%;min-height:40vh;box-sizing:border-box;font:12px/1.4 ui-monospace,monospace;background:#1b2027;color:var(--fg);border:1px solid #333;border-radius:8px;padding:8px}
+  #result .row{display:flex;gap:8px}
+  #result .row button{flex:1}
+  canvas#sketch{width:100%;max-width:100%;background:#1b2027;border-radius:8px}
+  #hidden{display:none}
+</style>
+</head>
+<body>
+
+<div id="start">
+  <h1>AR断面計測 試作</h1>
+  <p>Android Chrome（ARCore対応機）で使います。カメラを床・壁・役物に向け、折れ点を順にタップしてください。</p>
+  <button id="btnStart" class="primary">ARを開始</button>
+  <p id="unsupported">この端末/ブラウザはWebXR ARに対応していません。Android Chrome + ARCore対応機で開いてください（HTTPS必須）。</p>
+</div>
+
+<div id="overlay" hidden>
+  <div id="top">
+    <h1>断面入力</h1>
+    <div id="status">平面を探しています…ゆっくり端末を動かしてください</div>
+    <div id="readout"></div>
+  </div>
+  <div id="bottom">
+    <div id="hint">照準（リング）が折れ点に合ったら画面をタップ</div>
+    <button id="btnUndo">1つ戻す</button>
+    <button id="btnClear" class="danger">クリア</button>
+    <button id="btnDone" class="primary" disabled>確定</button>
+  </div>
+</div>
+
+<div id="result">
+  <h2>断面データ</h2>
+  <canvas id="sketch" width="800" height="500"></canvas>
+  <textarea id="json" readonly></textarea>
+  <div class="row">
+    <button id="btnCopy" class="primary">JSONをコピー</button>
+    <button id="btnBack">ARに戻る</button>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.152.2/three.min.js"></script>
+<script>
+(function(){
+  const $=id=>document.getElementById(id);
+  const startEl=$('start'), overlay=$('overlay'), resultEl=$('result');
+  const statusEl=$('status'), readout=$('readout');
+  const btnStart=$('btnStart'), btnUndo=$('btnUndo'), btnClear=$('btnClear'), btnDone=$('btnDone');
+
+  // ---- 対応チェック ----
+  if(!navigator.xr){ $('unsupported').style.display='block'; btnStart.disabled=true; }
+  else navigator.xr.isSessionSupported('immersive-ar').then(ok=>{
+    if(!ok){ $('unsupported').style.display='block'; btnStart.disabled=true; }
+  });
+
+  // ---- three.js ----
+  const scene=new THREE.Scene();
+  const camera=new THREE.PerspectiveCamera(70,innerWidth/innerHeight,0.01,20);
+  const renderer=new THREE.WebGLRenderer({antialias:true,alpha:true});
+  renderer.setPixelRatio(devicePixelRatio);
+  renderer.setSize(innerWidth,innerHeight);
+  renderer.xr.enabled=true;
+  document.body.appendChild(renderer.domElement);
+  scene.add(new THREE.HemisphereLight(0xffffff,0x444444,1));
+
+  // 照準
+  const reticle=new THREE.Mesh(
+    new THREE.RingGeometry(0.012,0.018,32).rotateX(-Math.PI/2),
+    new THREE.MeshBasicMaterial({color:0xffb020})
+  );
+  reticle.matrixAutoUpdate=false; reticle.visible=false; scene.add(reticle);
+
+  // 点と線
+  const points=[]; // THREE.Vector3
+  const markerGeo=new THREE.SphereGeometry(0.006,16,16);
+  const markerMat=new THREE.MeshBasicMaterial({color:0x4cd27a});
+  const markers=new THREE.Group(); scene.add(markers);
+  const lineGeo=new THREE.BufferGeometry();
+  const line=new THREE.Line(lineGeo,new THREE.LineBasicMaterial({color:0xffb020,linewidth:2}));
+  scene.add(line);
+
+  function refreshLine(){
+    lineGeo.setFromPoints(points.length?points:[new THREE.Vector3()]);
+    lineGeo.computeBoundingSphere();
+    line.visible=points.length>1;
+  }
+
+  // ---- 計測 ----
+  const mm=v=>Math.round(v*1000);
+  function segments(){ const s=[]; for(let i=1;i<points.length;i++) s.push(points[i].distanceTo(points[i-1])); return s; }
+  function angles(){
+    const a=[];
+    for(let i=1;i<points.length-1;i++){
+      const u=new THREE.Vector3().subVectors(points[i-1],points[i]);
+      const v=new THREE.Vector3().subVectors(points[i+1],points[i]);
+      a.push(THREE.MathUtils.radToDeg(u.angleTo(v)));
+    }
+    return a;
+  }
+  function render2D(){
+    readout.innerHTML='';
+    const seg=segments(), ang=angles();
+    seg.forEach((L,i)=>{
+      readout.insertAdjacentHTML('beforeend',`<div><span class="k">辺 ${i+1}</span><span class="v">${mm(L)} mm</span></div>`);
+      if(ang[i]!==undefined) readout.insertAdjacentHTML('beforeend',`<div class="ang"><span class="k">　角 ${i+2}（内角 / 折り）</span><span class="v">${ang[i].toFixed(1)}° / ${(180-ang[i]).toFixed(1)}°</span></div>`);
+    });
+    if(seg.length) readout.insertAdjacentHTML('beforeend',`<div class="tot"><span class="k">展開長（合計）</span><span class="v">${mm(seg.reduce((a,b)=>a+b,0))} mm</span></div>`);
+    btnDone.disabled=points.length<2;
+    btnUndo.disabled=points.length===0;
+    $('hint').textContent=points.length===0?'照準（リング）が1点目に合ったら画面をタップ':`点 ${points.length} まで入力。次の折れ点をタップ`;
+  }
+
+  // 2D投影（最初の3点で面を決める。2点なら線分）
+  function profile2D(){
+    if(points.length<2) return [];
+    const p0=points[0];
+    const u=new THREE.Vector3().subVectors(points[1],p0).normalize();
+    let n=null;
+    for(let i=2;i<points.length;i++){
+      const w=new THREE.Vector3().subVectors(points[i],p0);
+      const c=new THREE.Vector3().crossVectors(u,w);
+      if(c.length()>1e-4){ n=c.normalize(); break; }
+    }
+    if(!n) n=new THREE.Vector3(0,1,0).cross(u).normalize();
+    const v=new THREE.Vector3().crossVectors(n,u).normalize();
+    return points.map(p=>{ const d=new THREE.Vector3().subVectors(p,p0); return {x:mm(d.dot(u)),y:mm(d.dot(v))}; });
+  }
+
+  function drawSketch(pts){
+    const cv=$('sketch'), ctx=cv.getContext('2d');
+    ctx.clearRect(0,0,cv.width,cv.height);
+    if(pts.length<2) return;
+    const xs=pts.map(p=>p.x), ys=pts.map(p=>p.y);
+    const minX=Math.min(...xs),maxX=Math.max(...xs),minY=Math.min(...ys),maxY=Math.max(...ys);
+    const pad=60, sc=Math.min((cv.width-pad*2)/Math.max(maxX-minX,1),(cv.height-pad*2)/Math.max(maxY-minY,1));
+    const X=x=>pad+(x-minX)*sc, Y=y=>cv.height-pad-(y-minY)*sc;
+    ctx.lineWidth=3; ctx.strokeStyle='#ffb020'; ctx.beginPath();
+    pts.forEach((p,i)=>i?ctx.lineTo(X(p.x),Y(p.y)):ctx.moveTo(X(p.x),Y(p.y))); ctx.stroke();
+    ctx.fillStyle='#f2f3f5'; ctx.font='20px system-ui';
+    pts.forEach((p,i)=>{ ctx.beginPath(); ctx.arc(X(p.x),Y(p.y),6,0,7); ctx.fill(); ctx.fillText(String(i+1),X(p.x)+8,Y(p.y)-8); });
+    ctx.fillStyle='#9aa3ad'; ctx.font='18px system-ui';
+    for(let i=1;i<pts.length;i++){
+      const a=pts[i-1],b=pts[i]; const L=Math.round(Math.hypot(b.x-a.x,b.y-a.y));
+      ctx.fillText(L+' mm',(X(a.x)+X(b.x))/2+6,(Y(a.y)+Y(b.y))/2-6);
+    }
+  }
+
+  // ---- XR セッション ----
+  let session=null, hitSource=null, refSpace=null;
+  btnStart.addEventListener('click',async()=>{
+    try{
+      session=await navigator.xr.requestSession('immersive-ar',{
+        requiredFeatures:['hit-test'],
+        optionalFeatures:['dom-overlay'],
+        domOverlay:{root:overlay}
+      });
+    }catch(e){ statusEl.textContent='AR開始に失敗: '+e.message; $('unsupported').style.display='block'; $('unsupported').textContent='AR開始に失敗: '+e.message; return; }
+    startEl.hidden=true; overlay.hidden=false;
+    renderer.xr.setReferenceSpaceType('local');
+    await renderer.xr.setSession(session);
+    refSpace=renderer.xr.getReferenceSpace();
+    const viewer=await session.requestReferenceSpace('viewer');
+    hitSource=await session.requestHitTestSource({space:viewer});
+    session.addEventListener('select',onSelect);
+    session.addEventListener('end',()=>{ hitSource=null; session=null; overlay.hidden=true; startEl.hidden=false; });
+    renderer.setAnimationLoop(onFrame);
+  });
+
+  // ボタン上のタップでselectを発火させない
+  $('bottom').addEventListener('beforexrselect',e=>e.preventDefault());
+  $('top').addEventListener('beforexrselect',e=>e.preventDefault());
+
+  function onFrame(t,frame){
+    if(frame&&hitSource){
+      const hits=frame.getHitTestResults(hitSource);
+      if(hits.length){
+        const pose=hits[0].getPose(refSpace);
+        reticle.visible=true; reticle.matrix.fromArray(pose.transform.matrix);
+        statusEl.textContent='面を検出中。距離表示は照準位置が基準';
+      }else{ reticle.visible=false; statusEl.textContent='平面を探しています…ゆっくり端末を動かしてください'; }
+    }
+    renderer.render(scene,camera);
+  }
+
+  function onSelect(){
+    if(!reticle.visible) return;
+    const p=new THREE.Vector3().setFromMatrixPosition(reticle.matrix);
+    points.push(p);
+    const m=new THREE.Mesh(markerGeo,markerMat); m.position.copy(p); markers.add(m);
+    refreshLine(); render2D();
+    if(navigator.vibrate) navigator.vibrate(20);
+  }
+  btnUndo.addEventListener('click',()=>{ points.pop(); if(markers.children.length) markers.remove(markers.children.at(-1)); refreshLine(); render2D(); });
+  btnClear.addEventListener('click',()=>{ points.length=0; markers.clear(); refreshLine(); render2D(); });
+  btnDone.addEventListener('click',()=>{
+    const p2=profile2D();
+    const data={
+      type:'profile', unit:'mm', createdAt:new Date().toISOString(),
+      points3d:points.map(p=>({x:mm(p.x),y:mm(p.y),z:mm(p.z)})),
+      profile2d:p2,
+      segments_mm:segments().map(mm),
+      angles_deg:angles().map(a=>+a.toFixed(1)),
+      bend_deg:angles().map(a=>+(180-a).toFixed(1)),
+      total_mm:mm(segments().reduce((a,b)=>a+b,0))
+    };
+    $('json').value=JSON.stringify(data,null,2);
+    drawSketch(p2);
+    resultEl.style.display='flex';
+    if(session) session.end();
+  });
+  $('btnCopy').addEventListener('click',()=>{
+    const ta=$('json');
+    navigator.clipboard?.writeText(ta.value).then(()=>{$('btnCopy').textContent='コピーしました';setTimeout(()=>$('btnCopy').textContent='JSONをコピー',1500);}).catch(()=>{ta.select();});
+  });
+  $('btnBack').addEventListener('click',()=>{ resultEl.style.display='none'; btnStart.click(); });
+
+  addEventListener('resize',()=>{ camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight); });
+  refreshLine(); render2D();
+})();
+</script>
+</body>
+</html>
