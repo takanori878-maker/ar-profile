@@ -3,252 +3,299 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>AR断面計測 試作</title>
+<title>AR屋根拾い 試作v2</title>
 <style>
   :root{
-    --bg:#111418; --fg:#f2f3f5; --mute:#9aa3ad; --accent:#ffb020; --ok:#4cd27a; --ng:#ff5c5c;
-    --panel:rgba(17,20,24,.72);
+    --bg:#111418; --fg:#f2f3f5; --mute:#9aa3ad; --accent:#ffb020; --ok:#4cd27a; --ng:#ff5c5c; --blue:#5ab0ff;
+    --panel:rgba(17,20,24,.78); --line:rgba(255,255,255,.1);
   }
-  html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
-  #overlay{position:fixed;inset:0;pointer-events:none;display:flex;flex-direction:column;justify-content:space-between}
-  #top{pointer-events:auto;margin:env(safe-area-inset-top,0) 12px 0;padding:10px 12px;background:var(--panel);border-radius:10px;backdrop-filter:blur(6px)}
-  #top h1{margin:0 0 4px;font-size:13px;color:var(--mute);font-weight:600;letter-spacing:.04em}
-  #status{font-size:13px;color:var(--mute)}
-  #readout{font-variant-numeric:tabular-nums;max-height:34vh;overflow:auto;margin-top:6px}
-  #readout div{display:flex;justify-content:space-between;gap:10px;border-top:1px solid rgba(255,255,255,.08);padding:3px 0}
-  #readout .k{color:var(--mute)} #readout .v{font-weight:600}
-  #readout .ang .v{color:var(--accent)}
-  #readout .tot{border-top:2px solid rgba(255,255,255,.25);margin-top:4px;font-size:15px}
-  #bottom{pointer-events:auto;margin:0 12px calc(env(safe-area-inset-bottom,0) + 12px);display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
-  button{font:inherit;font-weight:700;padding:14px 8px;border:0;border-radius:10px;background:#2a3038;color:var(--fg);cursor:pointer}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,-apple-system,"Segoe UI","Noto Sans JP",sans-serif}
+  button{font:inherit;font-weight:700;padding:14px 10px;border:0;border-radius:12px;background:#2a3038;color:var(--fg);cursor:pointer;min-height:52px}
   button.primary{background:var(--accent);color:#111}
+  button.ok{background:var(--ok);color:#0b2a16}
   button.danger{background:#3a2323;color:#ffb3b3}
-  button:disabled{opacity:.4}
-  #hint{grid-column:1/-1;text-align:center;color:var(--mute);font-size:12px;background:var(--panel);border-radius:8px;padding:6px}
+  button.ghost{background:transparent;border:1px solid var(--line)}
+  button:disabled{opacity:.35}
+  .num{font-variant-numeric:tabular-nums}
+  input[type=number],input[type=text]{font:inherit;padding:10px;border-radius:8px;border:1px solid #3a4250;background:#1b2027;color:var(--fg);width:100%}
+
+  /* 開始画面 */
   #start{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:24px;text-align:center}
-  #start h1{font-size:20px;margin:0}
-  #start p{color:var(--mute);max-width:32ch;margin:0}
-  #start button{width:min(100%,320px);font-size:16px}
+  #start h1{font-size:22px;margin:0}
+  #start p{color:var(--mute);max-width:34ch;margin:0}
+  #start button{width:min(100%,320px);font-size:17px}
   #unsupported{color:var(--ng);display:none;max-width:36ch}
-  #result{position:fixed;inset:0;background:var(--bg);display:none;flex-direction:column;padding:calc(env(safe-area-inset-top,0) + 16px) 16px 16px;gap:10px;overflow:auto}
-  #result h2{margin:0;font-size:16px}
-  #result textarea{width:100%;min-height:40vh;box-sizing:border-box;font:12px/1.4 ui-monospace,monospace;background:#1b2027;color:var(--fg);border:1px solid #333;border-radius:8px;padding:8px}
-  #result .row{display:flex;gap:8px}
-  #result .row button{flex:1}
-  canvas#sketch{width:100%;max-width:100%;background:#1b2027;border-radius:8px}
-  #hidden{display:none}
+  #savedNote{color:var(--ok);font-size:13px}
+
+  /* AR オーバーレイ */
+  #overlay{position:fixed;inset:0;pointer-events:none;display:flex;flex-direction:column;justify-content:space-between}
+  #top{pointer-events:auto;margin:calc(env(safe-area-inset-top,0) + 8px) 10px 0;padding:8px 12px;background:var(--panel);border-radius:12px;backdrop-filter:blur(6px)}
+  #top .row{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+  #status{font-size:12px;color:var(--mute)}
+  #faceLabel{font-weight:800;color:var(--accent)}
+  #live{font-size:13px;color:var(--mute);max-height:22vh;overflow:auto;margin-top:4px}
+  #live div{display:flex;justify-content:space-between;border-top:1px solid var(--line);padding:2px 0}
+  #bottom{pointer-events:auto;margin:0 10px calc(env(safe-area-inset-bottom,0) + 10px);display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+  #hint{grid-column:1/-1;text-align:center;color:var(--mute);font-size:12px;background:var(--panel);border-radius:8px;padding:6px}
+
+  /* 面確定パネル（AR内） */
+  #facePanel{pointer-events:auto;position:absolute;inset:auto 10px calc(env(safe-area-inset-bottom,0) + 10px);max-height:78vh;overflow:auto;background:var(--panel);backdrop-filter:blur(8px);border-radius:14px;padding:12px;display:none;flex-direction:column;gap:10px}
+  #facePanel h3{margin:0;font-size:15px}
+  .chips{display:flex;flex-wrap:wrap;gap:6px}
+  .chip{padding:8px 12px;border-radius:999px;background:#2a3038;font-size:13px;font-weight:700;min-height:0}
+  .chip.sel{background:var(--accent);color:#111}
+  .edgeRow{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;border-top:1px solid var(--line);padding:6px 0}
+  .edgeRow .l{font-size:13px;color:var(--mute)}
+  .edgeRow .l b{color:var(--fg);font-size:15px}
+  .edgeRow button{padding:8px 12px;min-height:0;font-size:13px;background:#334;color:var(--fg)}
+  .edgeRow button.typed{background:var(--blue);color:#07213a}
+  .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+  .stat{background:#1b2027;border-radius:10px;padding:8px}
+  .stat .k{font-size:11px;color:var(--mute)} .stat .v{font-size:16px;font-weight:800}
+
+  /* 一覧・出力 */
+  #summary{position:fixed;inset:0;background:var(--bg);display:none;flex-direction:column;padding:calc(env(safe-area-inset-top,0) + 12px) 14px calc(env(safe-area-inset-bottom,0) + 12px);gap:12px;overflow:auto}
+  #summary h2{margin:0;font-size:18px}
+  .card{background:#1b2027;border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:8px}
+  .card h4{margin:0;display:flex;justify-content:space-between;align-items:center}
+  .card h4 small{color:var(--mute);font-weight:400;font-size:12px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  td,th{padding:4px 2px;border-top:1px solid var(--line);text-align:left}
+  td.r,th.r{text-align:right}
+  .corr{display:grid;grid-template-columns:1fr 1fr auto;gap:6px;align-items:center}
+  .corr select{font:inherit;padding:10px;border-radius:8px;background:#111418;color:var(--fg);border:1px solid #3a4250}
+  textarea{width:100%;min-height:30vh;font:12px/1.4 ui-monospace,monospace;background:#1b2027;color:var(--fg);border:1px solid #333;border-radius:8px;padding:8px}
+  .row2{display:flex;gap:8px}.row2>*{flex:1}
+  .warn{font-size:12px;color:var(--accent)}
 </style>
 </head>
 <body>
 
 <div id="start">
-  <h1>AR断面計測 試作</h1>
-  <p>Android Chrome（ARCore対応機）で使います。カメラを床・壁・役物に向け、折れ点を順にタップしてください。</p>
+  <h1>AR屋根拾い 試作v2</h1>
+  <p>屋根上または地上で、屋根面の角を順にタップ→「面を閉じる」。面積・勾配・部材長さが出ます。</p>
+  <div id="savedNote"></div>
   <button id="btnStart" class="primary">ARを開始</button>
+  <button id="btnSummary0" class="ghost">保存済みの面を見る</button>
   <p id="unsupported">この端末/ブラウザはWebXR ARに対応していません。Android Chrome + ARCore対応機で開いてください（HTTPS必須）。</p>
 </div>
 
 <div id="overlay" hidden>
   <div id="top">
-    <h1>断面入力</h1>
-    <div id="status">平面を探しています…ゆっくり端末を動かしてください</div>
-    <div id="readout"></div>
+    <div class="row"><span id="faceLabel">面 1</span><span id="status">平面を探しています…</span></div>
+    <div id="live"></div>
   </div>
+  <div id="facePanel"></div>
   <div id="bottom">
-    <div id="hint">照準（リング）が折れ点に合ったら画面をタップ</div>
-    <button id="btnUndo">1つ戻す</button>
-    <button id="btnClear" class="danger">クリア</button>
-    <button id="btnDone" class="primary" disabled>確定</button>
+    <div id="hint">照準リングを屋根面の角に合わせてタップ</div>
+    <button id="btnUndo">1点戻す</button>
+    <button id="btnClose" class="ok" disabled>面を閉じる</button>
+    <button id="btnList">一覧へ</button>
   </div>
 </div>
 
-<div id="result">
-  <h2>断面データ</h2>
-  <canvas id="sketch" width="800" height="500"></canvas>
-  <textarea id="json" readonly></textarea>
-  <div class="row">
-    <button id="btnCopy" class="primary">JSONをコピー</button>
-    <button id="btnBack">ARに戻る</button>
+<div id="summary">
+  <h2>屋根面 一覧</h2>
+  <div id="totals" class="card"></div>
+  <div id="faces"></div>
+  <div class="card">
+    <h4>出力（JSON）</h4>
+    <textarea id="json" readonly></textarea>
+    <div class="row2"><button id="btnCopy" class="primary">JSONをコピー</button><button id="btnClearAll" class="danger">全削除</button></div>
   </div>
+  <div class="row2"><button id="btnBackAR" class="ok">ARに戻って続ける</button><button id="btnHome" class="ghost">最初へ</button></div>
+  <p class="warn">※ARに戻ると、保存済みの面は画面上には再表示されません（データは保持）。</p>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.152.2/three.min.js"></script>
 <script>
 (function(){
   const $=id=>document.getElementById(id);
-  const startEl=$('start'), overlay=$('overlay'), resultEl=$('result');
-  const statusEl=$('status'), readout=$('readout');
-  const btnStart=$('btnStart'), btnUndo=$('btnUndo'), btnClear=$('btnClear'), btnDone=$('btnDone');
-
-  // ---- 対応チェック ----
-  if(!navigator.xr){ $('unsupported').style.display='block'; btnStart.disabled=true; }
-  else navigator.xr.isSessionSupported('immersive-ar').then(ok=>{
-    if(!ok){ $('unsupported').style.display='block'; btnStart.disabled=true; }
-  });
-
-  // ---- three.js ----
-  const scene=new THREE.Scene();
-  const camera=new THREE.PerspectiveCamera(70,innerWidth/innerHeight,0.01,20);
-  const renderer=new THREE.WebGLRenderer({antialias:true,alpha:true});
-  renderer.setPixelRatio(devicePixelRatio);
-  renderer.setSize(innerWidth,innerHeight);
-  renderer.xr.enabled=true;
-  document.body.appendChild(renderer.domElement);
-  scene.add(new THREE.HemisphereLight(0xffffff,0x444444,1));
-
-  // 照準
-  const reticle=new THREE.Mesh(
-    new THREE.RingGeometry(0.012,0.018,32).rotateX(-Math.PI/2),
-    new THREE.MeshBasicMaterial({color:0xffb020})
-  );
-  reticle.matrixAutoUpdate=false; reticle.visible=false; scene.add(reticle);
-
-  // 点と線
-  const points=[]; // THREE.Vector3
-  const markerGeo=new THREE.SphereGeometry(0.006,16,16);
-  const markerMat=new THREE.MeshBasicMaterial({color:0x4cd27a});
-  const markers=new THREE.Group(); scene.add(markers);
-  const lineGeo=new THREE.BufferGeometry();
-  const line=new THREE.Line(lineGeo,new THREE.LineBasicMaterial({color:0xffb020,linewidth:2}));
-  scene.add(line);
-
-  function refreshLine(){
-    lineGeo.setFromPoints(points.length?points:[new THREE.Vector3()]);
-    lineGeo.computeBoundingSphere();
-    line.visible=points.length>1;
-  }
-
-  // ---- 計測 ----
+  const EDGE_TYPES=['軒先','ケラバ','棟','片棟','隅棟','谷','雨押','捨谷','その他'];
+  const NAME_PRESETS=['南','北','東','西','下屋','玄関','庇','その他'];
   const mm=v=>Math.round(v*1000);
-  function segments(){ const s=[]; for(let i=1;i<points.length;i++) s.push(points[i].distanceTo(points[i-1])); return s; }
-  function angles(){
-    const a=[];
-    for(let i=1;i<points.length-1;i++){
-      const u=new THREE.Vector3().subVectors(points[i-1],points[i]);
-      const v=new THREE.Vector3().subVectors(points[i+1],points[i]);
-      a.push(THREE.MathUtils.radToDeg(u.angleTo(v)));
-    }
-    return a;
+  const UP=new THREE.Vector3(0,1,0);
+
+  // ---------- データ ----------
+  let faces=[];                 // 保存済み面
+  try{ faces=JSON.parse(localStorage.getItem('arRoofFaces')||'[]'); }catch(e){ faces=[]; }
+  function persist(){ try{ localStorage.setItem('arRoofFaces',JSON.stringify(faces)); }catch(e){} }
+  function updateSavedNote(){ $('savedNote').textContent=faces.length?`保存済み：${faces.length}面`:''; $('btnSummary0').hidden=!faces.length; }
+  updateSavedNote();
+
+  // 面の幾何計算（points: [{x,y,z}] m単位）
+  function faceGeom(pts){
+    const P=pts.map(p=>new THREE.Vector3(p.x,p.y,p.z));
+    const n=new THREE.Vector3(); // Newell
+    for(let i=0;i<P.length;i++){ const a=P[i],b=P[(i+1)%P.length]; n.x+=(a.y-b.y)*(a.z+b.z); n.y+=(a.z-b.z)*(a.x+b.x); n.z+=(a.x-b.x)*(a.y+b.y); }
+    const area=n.length()/2; const nn=n.clone().normalize();
+    const tilt=Math.acos(Math.min(1,Math.abs(nn.dot(UP)))); // 水平面からの傾き
+    const edges=P.map((a,i)=>a.distanceTo(P[(i+1)%P.length]));
+    // 面内2D座標
+    const u=new THREE.Vector3().subVectors(P[1],P[0]).normalize();
+    const v=new THREE.Vector3().crossVectors(nn,u).normalize();
+    const p2=P.map(p=>{const d=new THREE.Vector3().subVectors(p,P[0]);return{x:mm(d.dot(u)),y:mm(d.dot(v))};});
+    return {area_m2:+area.toFixed(3), proj_area_m2:+(area*Math.cos(tilt)).toFixed(3),
+      slope_deg:+THREE.MathUtils.radToDeg(tilt).toFixed(1), slope_sun:+(10*Math.tan(tilt)).toFixed(1),
+      edges_mm:edges.map(mm), points2d:p2};
   }
-  function render2D(){
-    readout.innerHTML='';
-    const seg=segments(), ang=angles();
-    seg.forEach((L,i)=>{
-      readout.insertAdjacentHTML('beforeend',`<div><span class="k">辺 ${i+1}</span><span class="v">${mm(L)} mm</span></div>`);
-      if(ang[i]!==undefined) readout.insertAdjacentHTML('beforeend',`<div class="ang"><span class="k">　角 ${i+2}（内角 / 折り）</span><span class="v">${ang[i].toFixed(1)}° / ${(180-ang[i]).toFixed(1)}°</span></div>`);
-    });
-    if(seg.length) readout.insertAdjacentHTML('beforeend',`<div class="tot"><span class="k">展開長（合計）</span><span class="v">${mm(seg.reduce((a,b)=>a+b,0))} mm</span></div>`);
-    btnDone.disabled=points.length<2;
-    btnUndo.disabled=points.length===0;
-    $('hint').textContent=points.length===0?'照準（リング）が1点目に合ったら画面をタップ':`点 ${points.length} まで入力。次の折れ点をタップ`;
+  function sunLabel(s,d){ return `${s}寸 / ${d}°`; }
+
+  // ---------- 対応チェック ----------
+  if(!navigator.xr){ $('unsupported').style.display='block'; $('btnStart').disabled=true; }
+  else navigator.xr.isSessionSupported('immersive-ar').then(ok=>{ if(!ok){ $('unsupported').style.display='block'; $('btnStart').disabled=true; } });
+
+  // ---------- three.js ----------
+  const scene=new THREE.Scene();
+  const camera=new THREE.PerspectiveCamera(70,innerWidth/innerHeight,0.01,50);
+  const renderer=new THREE.WebGLRenderer({antialias:true,alpha:true});
+  renderer.setPixelRatio(devicePixelRatio); renderer.setSize(innerWidth,innerHeight); renderer.xr.enabled=true;
+  document.body.appendChild(renderer.domElement);
+  const reticle=new THREE.Mesh(new THREE.RingGeometry(0.02,0.03,32).rotateX(-Math.PI/2),new THREE.MeshBasicMaterial({color:0xffb020}));
+  reticle.matrixAutoUpdate=false; reticle.visible=false; scene.add(reticle);
+  const markers=new THREE.Group(); scene.add(markers);
+  const savedGroup=new THREE.Group(); scene.add(savedGroup);
+  const lineGeo=new THREE.BufferGeometry();
+  const line=new THREE.Line(lineGeo,new THREE.LineBasicMaterial({color:0xffb020})); scene.add(line);
+  const markerGeo=new THREE.SphereGeometry(0.012,16,16), markerMat=new THREE.MeshBasicMaterial({color:0x4cd27a});
+
+  let cur=[]; // 現在の面の点 THREE.Vector3
+  function refreshLine(){ lineGeo.setFromPoints(cur.length?cur:[new THREE.Vector3()]); lineGeo.computeBoundingSphere(); line.visible=cur.length>1; }
+  function renderLive(){
+    const live=$('live'); live.innerHTML='';
+    for(let i=1;i<cur.length;i++) live.insertAdjacentHTML('beforeend',`<div><span>辺 ${i}</span><b class="num">${mm(cur[i].distanceTo(cur[i-1]))} mm</b></div>`);
+    if(cur.length>=3){ const g=faceGeom(cur); live.insertAdjacentHTML('beforeend',`<div><span>閉じると：面積 ${g.area_m2} m² / 勾配 ${sunLabel(g.slope_sun,g.slope_deg)}</span></div>`); }
+    $('btnClose').disabled=cur.length<3; $('btnUndo').disabled=!cur.length;
+    $('faceLabel').textContent=`面 ${faces.length+1}`;
+    $('hint').textContent=cur.length?`点 ${cur.length}。次の角をタップ（3点以上で閉じられる）`:'照準リングを屋根面の角に合わせてタップ';
   }
 
-  // 2D投影（最初の3点で面を決める。2点なら線分）
-  function profile2D(){
-    if(points.length<2) return [];
-    const p0=points[0];
-    const u=new THREE.Vector3().subVectors(points[1],p0).normalize();
-    let n=null;
-    for(let i=2;i<points.length;i++){
-      const w=new THREE.Vector3().subVectors(points[i],p0);
-      const c=new THREE.Vector3().crossVectors(u,w);
-      if(c.length()>1e-4){ n=c.normalize(); break; }
-    }
-    if(!n) n=new THREE.Vector3(0,1,0).cross(u).normalize();
-    const v=new THREE.Vector3().crossVectors(n,u).normalize();
-    return points.map(p=>{ const d=new THREE.Vector3().subVectors(p,p0); return {x:mm(d.dot(u)),y:mm(d.dot(v))}; });
-  }
-
-  function drawSketch(pts){
-    const cv=$('sketch'), ctx=cv.getContext('2d');
-    ctx.clearRect(0,0,cv.width,cv.height);
-    if(pts.length<2) return;
-    const xs=pts.map(p=>p.x), ys=pts.map(p=>p.y);
-    const minX=Math.min(...xs),maxX=Math.max(...xs),minY=Math.min(...ys),maxY=Math.max(...ys);
-    const pad=60, sc=Math.min((cv.width-pad*2)/Math.max(maxX-minX,1),(cv.height-pad*2)/Math.max(maxY-minY,1));
-    const X=x=>pad+(x-minX)*sc, Y=y=>cv.height-pad-(y-minY)*sc;
-    ctx.lineWidth=3; ctx.strokeStyle='#ffb020'; ctx.beginPath();
-    pts.forEach((p,i)=>i?ctx.lineTo(X(p.x),Y(p.y)):ctx.moveTo(X(p.x),Y(p.y))); ctx.stroke();
-    ctx.fillStyle='#f2f3f5'; ctx.font='20px system-ui';
-    pts.forEach((p,i)=>{ ctx.beginPath(); ctx.arc(X(p.x),Y(p.y),6,0,7); ctx.fill(); ctx.fillText(String(i+1),X(p.x)+8,Y(p.y)-8); });
-    ctx.fillStyle='#9aa3ad'; ctx.font='18px system-ui';
-    for(let i=1;i<pts.length;i++){
-      const a=pts[i-1],b=pts[i]; const L=Math.round(Math.hypot(b.x-a.x,b.y-a.y));
-      ctx.fillText(L+' mm',(X(a.x)+X(b.x))/2+6,(Y(a.y)+Y(b.y))/2-6);
-    }
-  }
-
-  // ---- XR セッション ----
-  let session=null, hitSource=null, refSpace=null;
-  btnStart.addEventListener('click',async()=>{
+  // ---------- XR ----------
+  let session=null,hitSource=null,refSpace=null;
+  async function startAR(){
     try{
-      session=await navigator.xr.requestSession('immersive-ar',{
-        requiredFeatures:['hit-test'],
-        optionalFeatures:['dom-overlay'],
-        domOverlay:{root:overlay}
-      });
-    }catch(e){ statusEl.textContent='AR開始に失敗: '+e.message; $('unsupported').style.display='block'; $('unsupported').textContent='AR開始に失敗: '+e.message; return; }
-    startEl.hidden=true; overlay.hidden=false;
-    renderer.xr.setReferenceSpaceType('local');
-    await renderer.xr.setSession(session);
+      session=await navigator.xr.requestSession('immersive-ar',{requiredFeatures:['hit-test'],optionalFeatures:['dom-overlay'],domOverlay:{root:$('overlay')}});
+    }catch(e){ $('unsupported').style.display='block'; $('unsupported').textContent='AR開始に失敗: '+e.message; return; }
+    $('start').hidden=true; $('summary').style.display='none'; $('overlay').hidden=false;
+    renderer.xr.setReferenceSpaceType('local'); await renderer.xr.setSession(session);
     refSpace=renderer.xr.getReferenceSpace();
-    const viewer=await session.requestReferenceSpace('viewer');
-    hitSource=await session.requestHitTestSource({space:viewer});
+    hitSource=await session.requestHitTestSource({space:await session.requestReferenceSpace('viewer')});
     session.addEventListener('select',onSelect);
-    session.addEventListener('end',()=>{ hitSource=null; session=null; overlay.hidden=true; startEl.hidden=false; });
+    session.addEventListener('end',()=>{ hitSource=null; session=null; $('overlay').hidden=true; savedGroup.clear(); });
     renderer.setAnimationLoop(onFrame);
-  });
-
-  // ボタン上のタップでselectを発火させない
-  $('bottom').addEventListener('beforexrselect',e=>e.preventDefault());
-  $('top').addEventListener('beforexrselect',e=>e.preventDefault());
+    renderLive();
+  }
+  $('btnStart').addEventListener('click',startAR);
+  ['bottom','top','facePanel'].forEach(id=>$(id).addEventListener('beforexrselect',e=>e.preventDefault()));
 
   function onFrame(t,frame){
     if(frame&&hitSource){
       const hits=frame.getHitTestResults(hitSource);
-      if(hits.length){
-        const pose=hits[0].getPose(refSpace);
-        reticle.visible=true; reticle.matrix.fromArray(pose.transform.matrix);
-        statusEl.textContent='面を検出中。距離表示は照準位置が基準';
-      }else{ reticle.visible=false; statusEl.textContent='平面を探しています…ゆっくり端末を動かしてください'; }
+      if(hits.length){ reticle.visible=true; reticle.matrix.fromArray(hits[0].getPose(refSpace).transform.matrix); $('status').textContent='面検出中'; }
+      else{ reticle.visible=false; $('status').textContent='平面を探しています…ゆっくり動かす'; }
     }
     renderer.render(scene,camera);
   }
-
   function onSelect(){
-    if(!reticle.visible) return;
-    const p=new THREE.Vector3().setFromMatrixPosition(reticle.matrix);
-    points.push(p);
+    if(!reticle.visible||$('facePanel').style.display==='flex') return;
+    const p=new THREE.Vector3().setFromMatrixPosition(reticle.matrix); cur.push(p);
     const m=new THREE.Mesh(markerGeo,markerMat); m.position.copy(p); markers.add(m);
-    refreshLine(); render2D();
-    if(navigator.vibrate) navigator.vibrate(20);
+    refreshLine(); renderLive(); navigator.vibrate&&navigator.vibrate(20);
   }
-  btnUndo.addEventListener('click',()=>{ points.pop(); if(markers.children.length) markers.remove(markers.children.at(-1)); refreshLine(); render2D(); });
-  btnClear.addEventListener('click',()=>{ points.length=0; markers.clear(); refreshLine(); render2D(); });
-  btnDone.addEventListener('click',()=>{
-    const p2=profile2D();
-    const data={
-      type:'profile', unit:'mm', createdAt:new Date().toISOString(),
-      points3d:points.map(p=>({x:mm(p.x),y:mm(p.y),z:mm(p.z)})),
-      profile2d:p2,
-      segments_mm:segments().map(mm),
-      angles_deg:angles().map(a=>+a.toFixed(1)),
-      bend_deg:angles().map(a=>+(180-a).toFixed(1)),
-      total_mm:mm(segments().reduce((a,b)=>a+b,0))
-    };
-    $('json').value=JSON.stringify(data,null,2);
-    drawSketch(p2);
-    resultEl.style.display='flex';
+  $('btnUndo').addEventListener('click',()=>{ cur.pop(); markers.children.length&&markers.remove(markers.children.at(-1)); refreshLine(); renderLive(); });
+
+  // ---------- 面を閉じる → パネル ----------
+  let draft=null;
+  $('btnClose').addEventListener('click',()=>{
+    const pts=cur.map(p=>({x:p.x,y:p.y,z:p.z}));
+    const g=faceGeom(pts);
+    draft={name:'',points3d:pts,edgeTypes:pts.map(()=>''),scale:1,...g};
+    showFacePanel();
+  });
+  function showFacePanel(){
+    const fp=$('facePanel'); fp.style.display='flex';
+    const n=draft.points3d.length;
+    fp.innerHTML=`
+      <h3>面 ${faces.length+1} を保存</h3>
+      <div class="stats">
+        <div class="stat"><div class="k">実面積</div><div class="v num">${draft.area_m2} m²</div></div>
+        <div class="stat"><div class="k">水平投影</div><div class="v num">${draft.proj_area_m2} m²</div></div>
+        <div class="stat"><div class="k">勾配</div><div class="v num">${sunLabel(draft.slope_sun,draft.slope_deg)}</div></div>
+      </div>
+      <div><div class="l" style="font-size:12px;color:var(--mute)">面の名前</div><div class="chips" id="nameChips">${NAME_PRESETS.map(x=>`<button class="chip" data-n="${x}">${x}</button>`).join('')}</div></div>
+      <div><div style="font-size:12px;color:var(--mute)">辺の種別（タップで切替）</div><div id="edgeList"></div></div>
+      <div class="row2"><button id="btnCancelFace" class="ghost">戻る</button><button id="btnSaveFace" class="ok">保存して次の面</button></div>`;
+    fp.querySelectorAll('#nameChips .chip').forEach(b=>b.addEventListener('click',()=>{ fp.querySelectorAll('#nameChips .chip').forEach(c=>c.classList.remove('sel')); b.classList.add('sel'); draft.name=b.dataset.n; }));
+    const el=fp.querySelector('#edgeList');
+    const renderEdges=()=>{ el.innerHTML=''; for(let i=0;i<n;i++){ const t=draft.edgeTypes[i];
+      el.insertAdjacentHTML('beforeend',`<div class="edgeRow"><div class="l">辺 ${i+1}（点${i+1}→${(i+1)%n+1}） <b class="num">${draft.edges_mm[i]} mm</b></div><button data-i="${i}" class="${t?'typed':''}">${t||'種別'}</button></div>`); }
+      el.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{ const i=+b.dataset.i; const k=EDGE_TYPES.indexOf(draft.edgeTypes[i]); draft.edgeTypes[i]=EDGE_TYPES[(k+1)%EDGE_TYPES.length]; renderEdges(); })); };
+    renderEdges();
+    fp.querySelector('#btnCancelFace').addEventListener('click',()=>{ fp.style.display='none'; draft=null; });
+    fp.querySelector('#btnSaveFace').addEventListener('click',()=>{
+      if(!draft.name) draft.name=`面${faces.length+1}`;
+      const same=faces.filter(f=>f.name.replace(/\d+$/,'')===draft.name).length; if(same) draft.name+=same+1;
+      draft.id=Date.now(); faces.push(draft); persist(); updateSavedNote();
+      // 保存済みを緑のループで表示
+      const loop=new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(cur.slice()),new THREE.LineBasicMaterial({color:0x4cd27a})); savedGroup.add(loop);
+      cur=[]; markers.clear(); refreshLine(); renderLive(); fp.style.display='none'; draft=null; navigator.vibrate&&navigator.vibrate([30,40,30]);
+    });
+  }
+
+  // ---------- 一覧 ----------
+  function openSummary(){
+    $('start').hidden=true; $('overlay').hidden=true; $('summary').style.display='flex';
     if(session) session.end();
-  });
-  $('btnCopy').addEventListener('click',()=>{
-    const ta=$('json');
-    navigator.clipboard?.writeText(ta.value).then(()=>{$('btnCopy').textContent='コピーしました';setTimeout(()=>$('btnCopy').textContent='JSONをコピー',1500);}).catch(()=>{ta.select();});
-  });
-  $('btnBack').addEventListener('click',()=>{ resultEl.style.display='none'; btnStart.click(); });
+    renderSummary();
+  }
+  $('btnList').addEventListener('click',openSummary);
+  $('btnSummary0').addEventListener('click',openSummary);
+  $('btnBackAR').addEventListener('click',startAR);
+  $('btnHome').addEventListener('click',()=>{ $('summary').style.display='none'; $('start').hidden=false; updateSavedNote(); });
+  $('btnClearAll').addEventListener('click',()=>{ if($('btnClearAll').dataset.arm){ faces=[]; persist(); updateSavedNote(); renderSummary(); delete $('btnClearAll').dataset.arm; $('btnClearAll').textContent='全削除'; } else { $('btnClearAll').dataset.arm='1'; $('btnClearAll').textContent='本当に全削除？（再タップ）'; setTimeout(()=>{delete $('btnClearAll').dataset.arm;$('btnClearAll').textContent='全削除';},3000); } });
+
+  function applyScale(f,k){ // 重心基準で拡縮
+    const c=f.points3d.reduce((a,p)=>({x:a.x+p.x/f.points3d.length,y:a.y+p.y/f.points3d.length,z:a.z+p.z/f.points3d.length}),{x:0,y:0,z:0});
+    f.points3d=f.points3d.map(p=>({x:c.x+(p.x-c.x)*k,y:c.y+(p.y-c.y)*k,z:c.z+(p.z-c.z)*k}));
+    Object.assign(f,faceGeom(f.points3d)); f.scale=+(f.scale*k).toFixed(4);
+  }
+  function totalsByType(){ const t={}; faces.forEach(f=>f.edgeTypes.forEach((ty,i)=>{ if(!ty) return; t[ty]=(t[ty]||0)+f.edges_mm[i]; })); return t; }
+  function buildJSON(){
+    return {type:'roof_faces',unit:'mm',createdAt:new Date().toISOString(),
+      faces:faces.map(f=>({name:f.name,area_m2:f.area_m2,proj_area_m2:f.proj_area_m2,slope_sun:f.slope_sun,slope_deg:f.slope_deg,scale:f.scale,
+        points3d:f.points3d.map(p=>({x:mm(p.x),y:mm(p.y),z:mm(p.z)})),points2d:f.points2d,
+        edges:f.edges_mm.map((L,i)=>({from:i+1,to:(i+1)%f.edges_mm.length+1,type:f.edgeTypes[i]||'',len_mm:L}))})),
+      totals:{area_m2:+faces.reduce((a,f)=>a+f.area_m2,0).toFixed(3),proj_area_m2:+faces.reduce((a,f)=>a+f.proj_area_m2,0).toFixed(3),byType_mm:totalsByType()}};
+  }
+  function renderSummary(){
+    const tt=totalsByType();
+    $('totals').innerHTML=`<h4>合計 <small>${faces.length}面</small></h4>
+      <div class="stats"><div class="stat"><div class="k">実面積</div><div class="v num">${faces.reduce((a,f)=>a+f.area_m2,0).toFixed(2)} m²</div></div>
+      <div class="stat"><div class="k">水平投影</div><div class="v num">${faces.reduce((a,f)=>a+f.proj_area_m2,0).toFixed(2)} m²</div></div>
+      <div class="stat"><div class="k">部材種別</div><div class="v num">${Object.keys(tt).length}</div></div></div>
+      <table>${Object.entries(tt).map(([k,v])=>`<tr><td>${k}</td><td class="r num">${(v/1000).toFixed(2)} m</td></tr>`).join('')||'<tr><td colspan=2 style="color:var(--mute)">辺の種別が未設定</td></tr>'}</table>`;
+    const fl=$('faces'); fl.innerHTML='';
+    faces.forEach((f,fi)=>{
+      const card=document.createElement('div'); card.className='card';
+      card.innerHTML=`<h4><span><input type="text" value="${f.name}" data-fi="${fi}" class="nm" style="width:9em;padding:6px"></span><small>勾配 ${sunLabel(f.slope_sun,f.slope_deg)}${f.scale!==1?` ・補正×${f.scale}`:''}</small></h4>
+        <div class="stats"><div class="stat"><div class="k">実面積</div><div class="v num">${f.area_m2} m²</div></div><div class="stat"><div class="k">水平投影</div><div class="v num">${f.proj_area_m2} m²</div></div><div class="stat"><div class="k">点数</div><div class="v num">${f.points3d.length}</div></div></div>
+        <table><tr><th>辺</th><th>種別</th><th class="r">長さ mm</th></tr>
+        ${f.edges_mm.map((L,i)=>`<tr><td>${i+1}</td><td><button class="chip et" data-fi="${fi}" data-i="${i}" style="padding:4px 10px">${f.edgeTypes[i]||'—'}</button></td><td class="r num">${L}</td></tr>`).join('')}</table>
+        <div class="corr"><select class="ce" data-fi="${fi}">${f.edges_mm.map((L,i)=>`<option value="${i}">辺${i+1}（AR ${L}）</option>`).join('')}</select><input type="number" class="cv" data-fi="${fi}" placeholder="実測 mm" inputmode="numeric"><button class="ca" data-fi="${fi}" style="min-height:0;padding:10px">補正</button></div>
+        <div class="row2"><button class="del danger" data-fi="${fi}" style="min-height:0;padding:8px">この面を削除</button></div>`;
+      fl.appendChild(card);
+    });
+    fl.querySelectorAll('.nm').forEach(i=>i.addEventListener('change',()=>{ faces[+i.dataset.fi].name=i.value; persist(); renderSummary(); }));
+    fl.querySelectorAll('.et').forEach(b=>b.addEventListener('click',()=>{ const f=faces[+b.dataset.fi],i=+b.dataset.i; const k=EDGE_TYPES.indexOf(f.edgeTypes[i]); f.edgeTypes[i]=EDGE_TYPES[(k+1)%EDGE_TYPES.length]; persist(); renderSummary(); }));
+    fl.querySelectorAll('.ca').forEach(b=>b.addEventListener('click',()=>{ const fi=+b.dataset.fi,f=faces[fi]; const sel=fl.querySelector(`.ce[data-fi="${fi}"]`),inp=fl.querySelector(`.cv[data-fi="${fi}"]`); const actual=+inp.value; if(!actual) return; const k=actual/f.edges_mm[+sel.value]; applyScale(f,k); persist(); renderSummary(); }));
+    fl.querySelectorAll('.del').forEach(b=>b.addEventListener('click',()=>{ faces.splice(+b.dataset.fi,1); persist(); updateSavedNote(); renderSummary(); }));
+    $('json').value=JSON.stringify(buildJSON(),null,1);
+  }
+  $('btnCopy').addEventListener('click',()=>{ const ta=$('json'); navigator.clipboard?.writeText(ta.value).then(()=>{$('btnCopy').textContent='コピーしました';setTimeout(()=>$('btnCopy').textContent='JSONをコピー',1500);}).catch(()=>ta.select()); });
 
   addEventListener('resize',()=>{ camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight); });
-  refreshLine(); render2D();
+  refreshLine();
 })();
 </script>
 </body>
